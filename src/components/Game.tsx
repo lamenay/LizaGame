@@ -12,33 +12,50 @@ interface Bullet {
   mesh: THREE.Mesh
   velocity: THREE.Vector3
   life: number
-  isPlayer: boolean
+  ownerId: string
   damage: number
 }
 
 interface Obstacle {
-  mesh: THREE.Mesh
   min: THREE.Vector3
   max: THREE.Vector3
+}
+
+interface BotState {
+  id: string
+  model: THREE.Group
+  pos: THREE.Vector3
+  hp: number
+  maxHp: number
+  lastShot: number
+  strafeDir: number
+  strafeTimer: number
+  name: string
+  emoji: string
 }
 
 export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [playerHP, setPlayerHP] = useState(playerCharacter === 'lisa' ? 100 : 80)
-  const [botHP, setBotHP] = useState(playerCharacter === 'lisa' ? 80 : 100)
+  const [bot1HP, setBot1HP] = useState(0)
+  const [bot2HP, setBot2HP] = useState(100) // Айдар
   const [gameOver, setGameOver] = useState<'win' | 'lose' | null>(null)
-  const [ammo, setAmmo] = useState(playerWeapon === 'shotgun' ? 8 : playerWeapon === 'sniper' ? 5 : playerWeapon === 'pistol' ? 12 : 30)
+  const maxAmmo = playerWeapon === 'shotgun' ? 8 : playerWeapon === 'sniper' ? 5 : playerWeapon === 'pistol' ? 12 : 30
+  const [ammo, setAmmo] = useState(maxAmmo)
   const [isReloading, setIsReloading] = useState(false)
   const [hitMarker, setHitMarker] = useState(false)
   const [damageFlash, setDamageFlash] = useState(false)
   const [killCount, setKillCount] = useState(0)
-  const [started, setStarted] = useState(false)
+  const [needsLock, setNeedsLock] = useState(true)
 
   const weaponStats = WEAPONS[playerWeapon]
-  const botCharacter: Character = playerCharacter === 'lisa' ? 'dasha' : 'lisa'
+  const bot1Character: Character = playerCharacter === 'lisa' ? 'dasha' : 'lisa'
   const playerMaxHP = playerCharacter === 'lisa' ? 100 : 80
-  const botMaxHP = botCharacter === 'lisa' ? 100 : 80
+  const bot1MaxHP = bot1Character === 'lisa' ? 100 : 80
   const playerSpeed = playerCharacter === 'lisa' ? 10 : 14
+
+  // Initialize bot1 HP
+  useEffect(() => { setBot1HP(bot1MaxHP) }, [])
 
   const showHitMarker = useCallback(() => {
     setHitMarker(true)
@@ -72,56 +89,42 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
     sunLight.position.set(30, 80, 40)
     sunLight.castShadow = true
     sunLight.shadow.mapSize.set(2048, 2048)
-    sunLight.shadow.camera.near = 1
-    sunLight.shadow.camera.far = 200
-    sunLight.shadow.camera.left = -80
-    sunLight.shadow.camera.right = 80
-    sunLight.shadow.camera.top = 80
-    sunLight.shadow.camera.bottom = -80
+    sunLight.shadow.camera.near = 1; sunLight.shadow.camera.far = 200
+    sunLight.shadow.camera.left = -80; sunLight.shadow.camera.right = 80
+    sunLight.shadow.camera.top = 80; sunLight.shadow.camera.bottom = -80
     scene.add(sunLight)
     scene.add(new THREE.HemisphereLight(0x87ceeb, 0x3d8c40, 0.3))
 
     // ===== GROUND =====
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(200, 200),
-      new THREE.MeshLambertMaterial({ color: 0x4a8c3f })
-    )
-    ground.rotation.x = -Math.PI / 2
-    ground.receiveShadow = true
-    scene.add(ground)
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshLambertMaterial({ color: 0x4a8c3f }))
+    ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground)
 
     // ===== OBSTACLES =====
     const obstacles: Obstacle[] = []
-    const addObstacle = (x: number, z: number, w: number, h: number, d: number, color: number) => {
+    const addObs = (x: number, z: number, w: number, h: number, d: number, color: number) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }))
-      mesh.position.set(x, h / 2, z)
-      mesh.castShadow = true
-      mesh.receiveShadow = true
-      scene.add(mesh)
-      obstacles.push({ mesh, min: new THREE.Vector3(x - w/2, 0, z - d/2), max: new THREE.Vector3(x + w/2, h, z + d/2) })
+      mesh.position.set(x, h / 2, z); mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh)
+      obstacles.push({ min: new THREE.Vector3(x - w/2, 0, z - d/2), max: new THREE.Vector3(x + w/2, h, z + d/2) })
     }
-
-    addObstacle(-25, -25, 10, 8, 10, 0x8b6914)
-    addObstacle(25, 25, 10, 8, 10, 0x8b6914)
-    addObstacle(-25, 25, 8, 5, 8, 0x696969)
-    addObstacle(25, -25, 8, 5, 8, 0x696969)
-    addObstacle(0, 0, 5, 4, 5, 0xa0522d)
-    addObstacle(-40, 0, 3, 3, 15, 0x556b2f)
-    addObstacle(40, 0, 3, 3, 15, 0x556b2f)
-    addObstacle(0, -40, 15, 3, 3, 0x556b2f)
-    addObstacle(0, 40, 15, 3, 3, 0x556b2f)
-    addObstacle(-10, -10, 3, 2, 3, 0xdeb887)
-    addObstacle(10, 10, 3, 2, 3, 0xdeb887)
-    addObstacle(-10, 15, 2, 1.5, 2, 0xdeb887)
-    addObstacle(10, -15, 2, 1.5, 2, 0xdeb887)
-    addObstacle(-35, -35, 4, 3, 4, 0x4a4a4a)
-    addObstacle(35, 35, 4, 3, 4, 0x4a4a4a)
-    addObstacle(35, -35, 4, 3, 4, 0x4a4a4a)
-    addObstacle(-35, 35, 4, 3, 4, 0x4a4a4a)
-    addObstacle(0, -90, 200, 10, 5, 0x3a3a3a)
-    addObstacle(0, 90, 200, 10, 5, 0x3a3a3a)
-    addObstacle(-90, 0, 5, 10, 200, 0x3a3a3a)
-    addObstacle(90, 0, 5, 10, 200, 0x3a3a3a)
+    addObs(-25, -25, 10, 8, 10, 0x8b6914)
+    addObs(25, 25, 10, 8, 10, 0x8b6914)
+    addObs(-25, 25, 8, 5, 8, 0x696969)
+    addObs(25, -25, 8, 5, 8, 0x696969)
+    addObs(0, 0, 5, 4, 5, 0xa0522d)
+    addObs(-40, 0, 3, 3, 15, 0x556b2f)
+    addObs(40, 0, 3, 3, 15, 0x556b2f)
+    addObs(0, -40, 15, 3, 3, 0x556b2f)
+    addObs(0, 40, 15, 3, 3, 0x556b2f)
+    addObs(-10, -10, 3, 2, 3, 0xdeb887)
+    addObs(10, 10, 3, 2, 3, 0xdeb887)
+    addObs(-35, -35, 4, 3, 4, 0x4a4a4a)
+    addObs(35, 35, 4, 3, 4, 0x4a4a4a)
+    addObs(35, -35, 4, 3, 4, 0x4a4a4a)
+    addObs(-35, 35, 4, 3, 4, 0x4a4a4a)
+    addObs(0, -90, 200, 10, 5, 0x3a3a3a)
+    addObs(0, 90, 200, 10, 5, 0x3a3a3a)
+    addObs(-90, 0, 5, 10, 200, 0x3a3a3a)
+    addObs(90, 0, 5, 10, 200, 0x3a3a3a)
 
     // Trees
     const createTree = (x: number, z: number) => {
@@ -134,234 +137,286 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
 
     // ===== CHARACTER: LISA =====
     const createLisa = (): THREE.Group => {
-      const group = new THREE.Group()
+      const g = new THREE.Group()
       const pantsMat = new THREE.MeshLambertMaterial({ color: 0xff69b4 })
       const topMat = new THREE.MeshLambertMaterial({ color: 0xffffff })
       const skinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac })
       const hairMat = new THREE.MeshLambertMaterial({ color: 0x722f37 })
-
-      // Legs - pink pants
       const legGeo = new THREE.CylinderGeometry(0.12, 0.11, 0.7, 8)
-      const legL = new THREE.Mesh(legGeo, pantsMat); legL.position.set(-0.15, 0.35, 0); legL.castShadow = true; group.add(legL)
-      const legR = new THREE.Mesh(legGeo, pantsMat); legR.position.set(0.15, 0.35, 0); legR.castShadow = true; group.add(legR)
-
-      // Shoes
+      const lL = new THREE.Mesh(legGeo, pantsMat); lL.position.set(-0.15, 0.35, 0); lL.castShadow = true; g.add(lL)
+      const lR = new THREE.Mesh(legGeo, pantsMat); lR.position.set(0.15, 0.35, 0); lR.castShadow = true; g.add(lR)
       const shoeMat = new THREE.MeshLambertMaterial({ color: 0xffffff })
       const shoeGeo = new THREE.BoxGeometry(0.14, 0.08, 0.22)
-      const shoeL = new THREE.Mesh(shoeGeo, shoeMat); shoeL.position.set(-0.15, 0.04, 0.03); group.add(shoeL)
-      const shoeR = new THREE.Mesh(shoeGeo, shoeMat); shoeR.position.set(0.15, 0.04, 0.03); group.add(shoeR)
-
-      // Torso - white top
+      g.add(Object.assign(new THREE.Mesh(shoeGeo, shoeMat), { position: new THREE.Vector3(-0.15, 0.04, 0.03) }))
+      g.add(Object.assign(new THREE.Mesh(shoeGeo, shoeMat), { position: new THREE.Vector3(0.15, 0.04, 0.03) }))
       const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.3, 0.7, 8), topMat)
-      torso.position.y = 1.05; torso.castShadow = true; group.add(torso)
-
-      // Belt
-      const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 0.06, 8), new THREE.MeshLambertMaterial({ color: 0xff1493 }))
-      belt.position.y = 0.72; group.add(belt)
-
-      // Arms
+      torso.position.y = 1.05; torso.castShadow = true; g.add(torso)
+      g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 0.06, 8), new THREE.MeshLambertMaterial({ color: 0xff1493 })), { position: new THREE.Vector3(0, 0.72, 0) }))
       const armGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.55, 8)
-      const armL = new THREE.Mesh(armGeo, skinMat); armL.position.set(-0.38, 1.05, 0.1); armL.rotation.x = -0.3; group.add(armL)
-      const armR = new THREE.Mesh(armGeo, skinMat); armR.position.set(0.38, 1.05, 0.15); armR.rotation.x = -0.5; group.add(armR)
-
-      // Neck
-      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.12, 8), skinMat); neck.position.y = 1.46; group.add(neck)
-
-      // Head
+      const aL = new THREE.Mesh(armGeo, skinMat); aL.position.set(-0.38, 1.05, 0.1); aL.rotation.x = -0.3; g.add(aL)
+      const aR = new THREE.Mesh(armGeo, skinMat); aR.position.set(0.38, 1.05, 0.15); aR.rotation.x = -0.5; g.add(aR)
+      g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.12, 8), skinMat), { position: new THREE.Vector3(0, 1.46, 0) }))
       const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10), skinMat)
-      head.position.y = 1.72; head.castShadow = true; group.add(head)
-
-      // Burgundy hair
-      const hairMain = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), hairMat)
-      hairMain.position.set(0, 1.78, -0.03); hairMain.scale.set(1, 0.9, 1.1); group.add(hairMain)
-      const bangs = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 0.15), hairMat)
-      bangs.position.set(0, 1.88, 0.15); group.add(bangs)
-      const hairBack = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.08, 0.6, 8), hairMat)
-      hairBack.position.set(0, 1.45, -0.2); group.add(hairBack)
-      const hairSideL = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.04, 0.35, 6), hairMat)
-      hairSideL.position.set(-0.22, 1.55, 0); hairSideL.rotation.z = 0.15; group.add(hairSideL)
-      const hairSideR = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.04, 0.35, 6), hairMat)
-      hairSideR.position.set(0.22, 1.55, 0); hairSideR.rotation.z = -0.15; group.add(hairSideR)
-
-      // Eyes
+      head.position.y = 1.72; head.castShadow = true; g.add(head)
+      const hM = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), hairMat)
+      hM.position.set(0, 1.78, -0.03); hM.scale.set(1, 0.9, 1.1); g.add(hM)
+      g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 0.15), hairMat), { position: new THREE.Vector3(0, 1.88, 0.15) }))
+      g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.08, 0.6, 8), hairMat), { position: new THREE.Vector3(0, 1.45, -0.2) }))
+      const hsL = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.04, 0.35, 6), hairMat)
+      hsL.position.set(-0.22, 1.55, 0); hsL.rotation.z = 0.15; g.add(hsL)
+      const hsR = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.04, 0.35, 6), hairMat)
+      hsR.position.set(0.22, 1.55, 0); hsR.rotation.z = -0.15; g.add(hsR)
       const eyeMat = new THREE.MeshBasicMaterial({ color: 0x2244aa })
-      const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff })
-      const eyeGeo = new THREE.SphereGeometry(0.04, 6, 6)
-      const eyeWhiteGeo = new THREE.SphereGeometry(0.055, 6, 6)
-      const ewL = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat); ewL.position.set(-0.09, 1.74, 0.2); group.add(ewL)
-      const eL = new THREE.Mesh(eyeGeo, eyeMat); eL.position.set(-0.09, 1.74, 0.23); group.add(eL)
-      const ewR = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat); ewR.position.set(0.09, 1.74, 0.2); group.add(ewR)
-      const eR = new THREE.Mesh(eyeGeo, eyeMat); eR.position.set(0.09, 1.74, 0.23); group.add(eR)
-
-      // Mouth
-      const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), new THREE.MeshBasicMaterial({ color: 0xff4466 }))
-      mouth.position.set(0, 1.64, 0.23); group.add(mouth)
-
-      // Gun
-      const gunGroup = new THREE.Group()
-      gunGroup.add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.4), new THREE.MeshLambertMaterial({ color: 0x222222 })))
-      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.25, 6), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }))
-      barrel.rotation.x = Math.PI / 2; barrel.position.z = 0.3; gunGroup.add(barrel)
-      gunGroup.position.set(0.38, 0.95, 0.35); gunGroup.rotation.x = -0.3; group.add(gunGroup)
-
-      return group
+      const ewMat = new THREE.MeshBasicMaterial({ color: 0xffffff })
+      const ewG = new THREE.SphereGeometry(0.055, 6, 6); const eG = new THREE.SphereGeometry(0.04, 6, 6)
+      g.add(Object.assign(new THREE.Mesh(ewG, ewMat), { position: new THREE.Vector3(-0.09, 1.74, 0.2) }))
+      g.add(Object.assign(new THREE.Mesh(eG, eyeMat), { position: new THREE.Vector3(-0.09, 1.74, 0.23) }))
+      g.add(Object.assign(new THREE.Mesh(ewG, ewMat), { position: new THREE.Vector3(0.09, 1.74, 0.2) }))
+      g.add(Object.assign(new THREE.Mesh(eG, eyeMat), { position: new THREE.Vector3(0.09, 1.74, 0.23) }))
+      g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), new THREE.MeshBasicMaterial({ color: 0xff4466 })), { position: new THREE.Vector3(0, 1.64, 0.23) }))
+      const gunG = new THREE.Group()
+      gunG.add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.4), new THREE.MeshLambertMaterial({ color: 0x222222 })))
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.25, 6), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }))
+      b.rotation.x = Math.PI / 2; b.position.z = 0.3; gunG.add(b)
+      gunG.position.set(0.38, 0.95, 0.35); gunG.rotation.x = -0.3; g.add(gunG)
+      return g
     }
 
     // ===== CHARACTER: DASHA (cat) =====
     const createDasha = (): THREE.Group => {
-      const group = new THREE.Group()
-      const furDark = new THREE.MeshLambertMaterial({ color: 0x3d2b1f })
-      const furBrown = new THREE.MeshLambertMaterial({ color: 0x8b5e3c })
-      const furLight = new THREE.MeshLambertMaterial({ color: 0xc4956a })
-      const furBlack = new THREE.MeshLambertMaterial({ color: 0x1a1a1a })
-
-      // Body
-      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.5, 8, 12), furBrown)
-      body.position.y = 0.9; body.castShadow = true; group.add(body)
-
-      // Dark patches
-      const p1 = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6), furDark)
-      p1.position.set(0.15, 1.0, 0.2); p1.scale.set(1, 1.5, 0.5); group.add(p1)
-      const p2 = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), furBlack)
-      p2.position.set(-0.18, 0.85, 0.15); p2.scale.set(1, 1.3, 0.5); group.add(p2)
-
-      // Chest
-      const chest = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), furLight)
-      chest.position.set(0, 0.75, 0.2); chest.scale.set(1, 1.2, 0.7); group.add(chest)
-
-      // Legs
+      const g = new THREE.Group()
+      const fD = new THREE.MeshLambertMaterial({ color: 0x3d2b1f })
+      const fB = new THREE.MeshLambertMaterial({ color: 0x8b5e3c })
+      const fL = new THREE.MeshLambertMaterial({ color: 0xc4956a })
+      const fK = new THREE.MeshLambertMaterial({ color: 0x1a1a1a })
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.5, 8, 12), fB)
+      body.position.y = 0.9; body.castShadow = true; g.add(body)
+      const p1 = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6), fD)
+      p1.position.set(0.15, 1.0, 0.2); p1.scale.set(1, 1.5, 0.5); g.add(p1)
+      const p2 = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), fK)
+      p2.position.set(-0.18, 0.85, 0.15); p2.scale.set(1, 1.3, 0.5); g.add(p2)
+      const ch = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), fL)
+      ch.position.set(0, 0.75, 0.2); ch.scale.set(1, 1.2, 0.7); g.add(ch)
       const legGeo = new THREE.CylinderGeometry(0.07, 0.06, 0.5, 8)
       const pawGeo = new THREE.SphereGeometry(0.08, 6, 6)
-      const fLL = new THREE.Mesh(legGeo, furBrown); fLL.position.set(-0.15, 0.25, 0.1); fLL.castShadow = true; group.add(fLL)
-      const fPL = new THREE.Mesh(pawGeo, furDark); fPL.position.set(-0.15, 0.04, 0.12); fPL.scale.set(1, 0.6, 1.2); group.add(fPL)
-      const fLR = new THREE.Mesh(legGeo, furBrown); fLR.position.set(0.15, 0.25, 0.1); fLR.castShadow = true; group.add(fLR)
-      const fPR = new THREE.Mesh(pawGeo, furDark); fPR.position.set(0.15, 0.04, 0.12); fPR.scale.set(1, 0.6, 1.2); group.add(fPR)
-      const bLegGeo = new THREE.CylinderGeometry(0.08, 0.07, 0.5, 8)
-      const bLL = new THREE.Mesh(bLegGeo, furBrown); bLL.position.set(-0.15, 0.25, -0.1); bLL.castShadow = true; group.add(bLL)
-      const bPL = new THREE.Mesh(pawGeo, furDark); bPL.position.set(-0.15, 0.04, -0.1); bPL.scale.set(1, 0.6, 1.2); group.add(bPL)
-      const bLR = new THREE.Mesh(bLegGeo, furBrown); bLR.position.set(0.15, 0.25, -0.1); bLR.castShadow = true; group.add(bLR)
-      const bPR = new THREE.Mesh(pawGeo, furDark); bPR.position.set(0.15, 0.04, -0.1); bPR.scale.set(1, 0.6, 1.2); group.add(bPR)
-
-      // Head
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), furBrown)
-      head.position.y = 1.5; head.scale.set(1, 0.9, 0.95); head.castShadow = true; group.add(head)
-      const headMark = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), furDark)
-      headMark.position.set(0, 1.6, -0.1); headMark.scale.set(1.2, 0.8, 0.8); group.add(headMark)
-      const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), furLight)
-      muzzle.position.set(0, 1.42, 0.2); muzzle.scale.set(1.2, 0.8, 0.8); group.add(muzzle)
-      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 6), new THREE.MeshLambertMaterial({ color: 0xff8888 }))
-      nose.position.set(0, 1.46, 0.28); group.add(nose)
-
-      // Eyes
+      const mk = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, sx=1, sy=1, sz=1) => {
+        const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.castShadow = true; g.add(m); return m
+      }
+      mk(legGeo, fB, -0.15, 0.25, 0.1); mk(pawGeo, fD, -0.15, 0.04, 0.12, 1, 0.6, 1.2)
+      mk(legGeo, fB, 0.15, 0.25, 0.1); mk(pawGeo, fD, 0.15, 0.04, 0.12, 1, 0.6, 1.2)
+      const blg = new THREE.CylinderGeometry(0.08, 0.07, 0.5, 8)
+      mk(blg, fB, -0.15, 0.25, -0.1); mk(pawGeo, fD, -0.15, 0.04, -0.1, 1, 0.6, 1.2)
+      mk(blg, fB, 0.15, 0.25, -0.1); mk(pawGeo, fD, 0.15, 0.04, -0.1, 1, 0.6, 1.2)
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), fB)
+      head.position.y = 1.5; head.scale.set(1, 0.9, 0.95); head.castShadow = true; g.add(head)
+      const hm = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), fD)
+      hm.position.set(0, 1.6, -0.1); hm.scale.set(1.2, 0.8, 0.8); g.add(hm)
+      const mz = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), fL)
+      mz.position.set(0, 1.42, 0.2); mz.scale.set(1.2, 0.8, 0.8); g.add(mz)
+      g.add(Object.assign(new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 6), new THREE.MeshLambertMaterial({ color: 0xff8888 })), { position: new THREE.Vector3(0, 1.46, 0.28) }))
+      const ewMat = new THREE.MeshBasicMaterial({ color: 0xeeffee })
       const eyeMat = new THREE.MeshBasicMaterial({ color: 0x44cc44 })
-      const pupilMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
-      const ewL = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: 0xeeffee }))
-      ewL.position.set(-0.12, 1.54, 0.2); group.add(ewL)
-      const eL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), eyeMat)
-      eL.position.set(-0.12, 1.54, 0.24); group.add(eL)
-      const pL = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 6), pupilMat)
-      pL.position.set(-0.12, 1.54, 0.27); pL.scale.set(0.5, 1, 0.5); group.add(pL)
-      const ewR = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: 0xeeffee }))
-      ewR.position.set(0.12, 1.54, 0.2); group.add(ewR)
-      const eR = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), eyeMat)
-      eR.position.set(0.12, 1.54, 0.24); group.add(eR)
-      const pR = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 6), pupilMat)
-      pR.position.set(0.12, 1.54, 0.27); pR.scale.set(0.5, 1, 0.5); group.add(pR)
-
-      // Ears
+      const pupMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
+      mk(new THREE.SphereGeometry(0.07, 8, 6), ewMat, -0.12, 1.54, 0.2)
+      mk(new THREE.SphereGeometry(0.06, 8, 6), eyeMat, -0.12, 1.54, 0.24)
+      const pl = mk(new THREE.SphereGeometry(0.03, 6, 6), pupMat, -0.12, 1.54, 0.27, 0.5, 1, 0.5)
+      mk(new THREE.SphereGeometry(0.07, 8, 6), ewMat, 0.12, 1.54, 0.2)
+      mk(new THREE.SphereGeometry(0.06, 8, 6), eyeMat, 0.12, 1.54, 0.24)
+      mk(new THREE.SphereGeometry(0.03, 6, 6), pupMat, 0.12, 1.54, 0.27, 0.5, 1, 0.5)
       const earGeo = new THREE.ConeGeometry(0.1, 0.22, 4)
-      const earL = new THREE.Mesh(earGeo, furBrown); earL.position.set(-0.16, 1.78, 0.02); earL.rotation.z = 0.2; group.add(earL)
-      const earR = new THREE.Mesh(earGeo, furBrown); earR.position.set(0.16, 1.78, 0.02); earR.rotation.z = -0.2; group.add(earR)
-      const iearMat = new THREE.MeshLambertMaterial({ color: 0xffaaaa })
-      const iearGeo = new THREE.ConeGeometry(0.05, 0.12, 4)
-      const ieL = new THREE.Mesh(iearGeo, iearMat); ieL.position.set(-0.16, 1.76, 0.05); ieL.rotation.z = 0.2; group.add(ieL)
-      const ieR = new THREE.Mesh(iearGeo, iearMat); ieR.position.set(0.16, 1.76, 0.05); ieR.rotation.z = -0.2; group.add(ieR)
-
-      // Whiskers
+      const eL = new THREE.Mesh(earGeo, fB); eL.position.set(-0.16, 1.78, 0.02); eL.rotation.z = 0.2; g.add(eL)
+      const eR = new THREE.Mesh(earGeo, fB); eR.position.set(0.16, 1.78, 0.02); eR.rotation.z = -0.2; g.add(eR)
+      const ieMat = new THREE.MeshLambertMaterial({ color: 0xffaaaa })
+      const ieGeo = new THREE.ConeGeometry(0.05, 0.12, 4)
+      const ie1 = new THREE.Mesh(ieGeo, ieMat); ie1.position.set(-0.16, 1.76, 0.05); ie1.rotation.z = 0.2; g.add(ie1)
+      const ie2 = new THREE.Mesh(ieGeo, ieMat); ie2.position.set(0.16, 1.76, 0.05); ie2.rotation.z = -0.2; g.add(ie2)
       const wMat = new THREE.MeshBasicMaterial({ color: 0xcccccc })
       const wGeo = new THREE.CylinderGeometry(0.003, 0.002, 0.2, 4)
-      for (let s = -1; s <= 1; s += 2) {
-        for (let i = 0; i < 3; i++) {
-          const w = new THREE.Mesh(wGeo, wMat)
-          w.position.set(s * 0.15, 1.43 + i * 0.03, 0.25)
-          w.rotation.z = Math.PI / 2 + s * (0.1 + i * 0.1)
-          group.add(w)
-        }
+      for (let s = -1; s <= 1; s += 2) for (let i = 0; i < 3; i++) {
+        const w = new THREE.Mesh(wGeo, wMat); w.position.set(s * 0.15, 1.43 + i * 0.03, 0.25)
+        w.rotation.z = Math.PI / 2 + s * (0.1 + i * 0.1); g.add(w)
       }
-
-      // Tail
       for (let i = 0; i < 8; i++) {
-        const t = i / 8
-        const seg = new THREE.Mesh(new THREE.SphereGeometry(0.05 - t * 0.02, 6, 6), i % 2 === 0 ? furBrown : furDark)
-        const angle = t * Math.PI * 0.6
-        seg.position.set(Math.sin(angle) * 0.1, 0.8 + t * 0.8, -0.3 - Math.cos(angle) * 0.3)
-        group.add(seg)
+        const t = i / 8; const seg = new THREE.Mesh(new THREE.SphereGeometry(0.05 - t * 0.02, 6, 6), i % 2 === 0 ? fB : fD)
+        const a = t * Math.PI * 0.6; seg.position.set(Math.sin(a) * 0.1, 0.8 + t * 0.8, -0.3 - Math.cos(a) * 0.3); g.add(seg)
       }
-
-      // Black stripe
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.3), furBlack)
-      stripe.position.set(0, 1.0, -0.15); group.add(stripe)
-
-      // Gun
+      const str = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.3), fK); str.position.set(0, 1.0, -0.15); g.add(str)
       const gunG = new THREE.Group()
       gunG.add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.35), new THREE.MeshLambertMaterial({ color: 0x222222 })))
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.2, 6), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }))
-      b.rotation.x = Math.PI / 2; b.position.z = 0.25; gunG.add(b)
-      gunG.position.set(0, 0.85, 0.35); gunG.rotation.x = -0.2; group.add(gunG)
-
-      return group
+      const br = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.2, 6), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }))
+      br.rotation.x = Math.PI / 2; br.position.z = 0.25; gunG.add(br)
+      gunG.position.set(0, 0.85, 0.35); gunG.rotation.x = -0.2; g.add(gunG)
+      return g
     }
 
-    const createCharacter = (isLisa: boolean) => isLisa ? createLisa() : createDasha()
+    // ===== CHARACTER: AIDAR =====
+    const createAidar = (): THREE.Group => {
+      const g = new THREE.Group()
+      const skinMat = new THREE.MeshLambertMaterial({ color: 0xe8c39e })
+      const hoodieMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a }) // чёрное худи
+      const pantsMat = new THREE.MeshLambertMaterial({ color: 0x111111 }) // широкие чёрные штаны
+      const hairMat = new THREE.MeshLambertMaterial({ color: 0x5c3a1e }) // коричневые волосы
+      const shoeMat = new THREE.MeshLambertMaterial({ color: 0x222222 })
 
-    const playerModel = createCharacter(playerCharacter === 'lisa')
+      // Широкие чёрные штаны (baggy pants)
+      const pantsGeo = new THREE.CylinderGeometry(0.2, 0.22, 0.75, 8)
+      const pantsL = new THREE.Mesh(pantsGeo, pantsMat); pantsL.position.set(-0.15, 0.38, 0); pantsL.castShadow = true; g.add(pantsL)
+      const pantsR = new THREE.Mesh(pantsGeo, pantsMat); pantsR.position.set(0.15, 0.38, 0); pantsR.castShadow = true; g.add(pantsR)
+      
+      // Кроссовки
+      const shoeGeo = new THREE.BoxGeometry(0.16, 0.1, 0.26)
+      g.add(Object.assign(new THREE.Mesh(shoeGeo, shoeMat), { position: new THREE.Vector3(-0.15, 0.05, 0.03) }))
+      g.add(Object.assign(new THREE.Mesh(shoeGeo, shoeMat), { position: new THREE.Vector3(0.15, 0.05, 0.03) }))
+      // Белая подошва
+      const soleMat = new THREE.MeshLambertMaterial({ color: 0xeeeeee })
+      const soleGeo = new THREE.BoxGeometry(0.17, 0.03, 0.27)
+      g.add(Object.assign(new THREE.Mesh(soleGeo, soleMat), { position: new THREE.Vector3(-0.15, 0.015, 0.03) }))
+      g.add(Object.assign(new THREE.Mesh(soleGeo, soleMat), { position: new THREE.Vector3(0.15, 0.015, 0.03) }))
+
+      // Чёрное худи (oversized)
+      const hoodieGeo = new THREE.CylinderGeometry(0.35, 0.38, 0.8, 8)
+      const hoodie = new THREE.Mesh(hoodieGeo, hoodieMat)
+      hoodie.position.y = 1.1; hoodie.castShadow = true; g.add(hoodie)
+      
+      // Карман на худи (кенгуру)
+      const pocketMat = new THREE.MeshLambertMaterial({ color: 0x252525 })
+      const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.15, 0.05), pocketMat)
+      pocket.position.set(0, 0.85, 0.33); g.add(pocket)
+
+      // Капюшон (сзади)
+      const hoodGeo = new THREE.SphereGeometry(0.22, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2)
+      const hood = new THREE.Mesh(hoodGeo, hoodieMat)
+      hood.position.set(0, 1.5, -0.15); hood.rotation.x = 0.3; g.add(hood)
+
+      // Руки в худи (длинные рукава)
+      const armGeo = new THREE.CylinderGeometry(0.08, 0.07, 0.6, 8)
+      const armL = new THREE.Mesh(armGeo, hoodieMat); armL.position.set(-0.4, 1.05, 0.1); armL.rotation.x = -0.3; armL.rotation.z = 0.15; g.add(armL)
+      const armR = new THREE.Mesh(armGeo, hoodieMat); armR.position.set(0.4, 1.05, 0.15); armR.rotation.x = -0.5; armR.rotation.z = -0.15; g.add(armR)
+      
+      // Кисти рук (выглядывают из рукавов)
+      const handGeo = new THREE.SphereGeometry(0.05, 6, 6)
+      g.add(Object.assign(new THREE.Mesh(handGeo, skinMat), { position: new THREE.Vector3(-0.42, 0.78, 0.2) }))
+      g.add(Object.assign(new THREE.Mesh(handGeo, skinMat), { position: new THREE.Vector3(0.42, 0.78, 0.3) }))
+
+      // Шея
+      g.add(Object.assign(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.1, 8), skinMat), { position: new THREE.Vector3(0, 1.55, 0) }))
+
+      // Голова
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), skinMat)
+      head.position.y = 1.75; head.castShadow = true; g.add(head)
+
+      // Волнистые коричневые волосы
+      // Основная масса волос
+      const hairMain = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8), hairMat)
+      hairMain.position.set(0, 1.82, -0.02); hairMain.scale.set(1.05, 0.85, 1.05); g.add(hairMain)
+      
+      // Волнистые пряди (несколько сфер для эффекта волн)
+      const waveGeo = new THREE.SphereGeometry(0.08, 6, 6)
+      const waves = [
+        [-0.18, 1.88, 0.1], [0.0, 1.92, 0.08], [0.18, 1.88, 0.1],
+        [-0.22, 1.78, -0.08], [0.22, 1.78, -0.08],
+        [-0.15, 1.7, -0.15], [0.15, 1.7, -0.15],
+        [0.0, 1.72, -0.18], [-0.1, 1.85, 0.15], [0.1, 1.85, 0.15],
+      ]
+      waves.forEach(([x, y, z]) => {
+        const w = new THREE.Mesh(waveGeo, hairMat)
+        w.position.set(x, y, z)
+        w.scale.set(1, 0.7, 1)
+        g.add(w)
+      })
+
+      // Чёлка (волнистая)
+      const bangGeo = new THREE.SphereGeometry(0.06, 6, 6)
+      for (let i = -2; i <= 2; i++) {
+        const bang = new THREE.Mesh(bangGeo, hairMat)
+        bang.position.set(i * 0.06, 1.88, 0.18)
+        bang.scale.set(1, 0.6, 0.8)
+        g.add(bang)
+      }
+
+      // Глаза
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0x4a3520 })
+      const ewMat = new THREE.MeshBasicMaterial({ color: 0xffffff })
+      const ewG = new THREE.SphereGeometry(0.05, 6, 6); const eG = new THREE.SphereGeometry(0.035, 6, 6)
+      g.add(Object.assign(new THREE.Mesh(ewG, ewMat), { position: new THREE.Vector3(-0.09, 1.77, 0.2) }))
+      g.add(Object.assign(new THREE.Mesh(eG, eyeMat), { position: new THREE.Vector3(-0.09, 1.77, 0.23) }))
+      g.add(Object.assign(new THREE.Mesh(ewG, ewMat), { position: new THREE.Vector3(0.09, 1.77, 0.2) }))
+      g.add(Object.assign(new THREE.Mesh(eG, eyeMat), { position: new THREE.Vector3(0.09, 1.77, 0.23) }))
+
+      // Брови
+      const browMat = new THREE.MeshBasicMaterial({ color: 0x3d2510 })
+      const browGeo = new THREE.BoxGeometry(0.08, 0.015, 0.02)
+      g.add(Object.assign(new THREE.Mesh(browGeo, browMat), { position: new THREE.Vector3(-0.09, 1.82, 0.22) }))
+      g.add(Object.assign(new THREE.Mesh(browGeo, browMat), { position: new THREE.Vector3(0.09, 1.82, 0.22) }))
+
+      // Рот
+      g.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.015, 0.02), new THREE.MeshBasicMaterial({ color: 0xcc6666 })), { position: new THREE.Vector3(0, 1.68, 0.22) }))
+
+      // Оружие
+      const gunG = new THREE.Group()
+      gunG.add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.45), new THREE.MeshLambertMaterial({ color: 0x222222 })))
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.25, 6), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }))
+      barrel.rotation.x = Math.PI / 2; barrel.position.z = 0.32; gunG.add(barrel)
+      const mag = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.1, 0.04), new THREE.MeshLambertMaterial({ color: 0x333333 }))
+      mag.position.set(0, -0.07, 0.05); mag.rotation.x = 0.15; gunG.add(mag)
+      gunG.position.set(0.42, 0.88, 0.35); gunG.rotation.x = -0.3; g.add(gunG)
+
+      return g
+    }
+
+    const createCharacter = (type: Character | 'aidar') => {
+      if (type === 'lisa') return createLisa()
+      if (type === 'dasha') return createDasha()
+      return createAidar()
+    }
+
+    // Player model
+    const playerModel = createCharacter(playerCharacter)
     playerModel.position.set(-40, 0, -40)
     scene.add(playerModel)
 
-    const botModel = createCharacter(botCharacter === 'lisa')
-    botModel.position.set(40, 0, 40)
-    scene.add(botModel)
+    // Bot 1 - opposite character
+    const bot1Model = createCharacter(bot1Character)
+    bot1Model.position.set(40, 0, 40)
+    scene.add(bot1Model)
+
+    // Bot 2 - Aidar
+    const bot2Model = createAidar()
+    bot2Model.position.set(40, 0, -40)
+    scene.add(bot2Model)
 
     // ===== FIRST PERSON WEAPON =====
     const fpWeapon = new THREE.Group()
     const fpGunMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a })
-
     if (playerWeapon === 'ak') {
       fpWeapon.add(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.5), fpGunMat))
       const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.3, 6), fpGunMat)
       barrel.rotation.x = Math.PI / 2; barrel.position.z = 0.35; fpWeapon.add(barrel)
       const mag = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.12, 0.04), new THREE.MeshLambertMaterial({ color: 0x333333 }))
       mag.position.set(0, -0.08, 0.05); mag.rotation.x = 0.2; fpWeapon.add(mag)
-      const stock = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.05, 0.15), new THREE.MeshLambertMaterial({ color: 0x654321 }))
-      stock.position.z = -0.3; fpWeapon.add(stock)
+      fpWeapon.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.05, 0.15), new THREE.MeshLambertMaterial({ color: 0x654321 })), { position: new THREE.Vector3(0, 0, -0.3) }))
     } else if (playerWeapon === 'shotgun') {
       fpWeapon.add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.55), fpGunMat))
       const b1 = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.35, 8), fpGunMat)
       b1.rotation.x = Math.PI / 2; b1.position.set(-0.015, 0.01, 0.4); fpWeapon.add(b1)
       const b2 = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.35, 8), fpGunMat)
       b2.rotation.x = Math.PI / 2; b2.position.set(0.015, 0.01, 0.4); fpWeapon.add(b2)
-      const pump = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.12), new THREE.MeshLambertMaterial({ color: 0x654321 }))
-      pump.position.set(0, -0.04, 0.15); fpWeapon.add(pump)
-      const stock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.2), new THREE.MeshLambertMaterial({ color: 0x8b4513 }))
-      stock.position.z = -0.35; fpWeapon.add(stock)
+      fpWeapon.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.12), new THREE.MeshLambertMaterial({ color: 0x654321 })), { position: new THREE.Vector3(0, -0.04, 0.15) }))
+      fpWeapon.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.2), new THREE.MeshLambertMaterial({ color: 0x8b4513 })), { position: new THREE.Vector3(0, 0, -0.35) }))
     } else if (playerWeapon === 'pistol') {
       fpWeapon.add(new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.2), fpGunMat))
       const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.08, 6), fpGunMat)
       barrel.rotation.x = Math.PI / 2; barrel.position.z = 0.12; fpWeapon.add(barrel)
-      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.08, 0.04), new THREE.MeshLambertMaterial({ color: 0x4a3728 }))
-      grip.position.set(0, -0.05, -0.05); grip.rotation.x = 0.3; fpWeapon.add(grip)
+      fpWeapon.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.08, 0.04), new THREE.MeshLambertMaterial({ color: 0x4a3728 })), { position: new THREE.Vector3(0, -0.05, -0.05) }))
     } else if (playerWeapon === 'sniper') {
       fpWeapon.add(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.05, 0.7), fpGunMat))
       const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.015, 0.4, 8), fpGunMat)
       barrel.rotation.x = Math.PI / 2; barrel.position.z = 0.5; fpWeapon.add(barrel)
       const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.15, 8), new THREE.MeshLambertMaterial({ color: 0x333333 }))
       scope.rotation.x = Math.PI / 2; scope.position.set(0, 0.05, 0.1); fpWeapon.add(scope)
-      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.024, 8), new THREE.MeshBasicMaterial({ color: 0x4488ff }))
-      lens.position.set(0, 0.05, 0.18); fpWeapon.add(lens)
-      const stock = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.07, 0.2), new THREE.MeshLambertMaterial({ color: 0x654321 }))
-      stock.position.z = -0.4; fpWeapon.add(stock)
+      fpWeapon.add(Object.assign(new THREE.Mesh(new THREE.CircleGeometry(0.024, 8), new THREE.MeshBasicMaterial({ color: 0x4488ff })), { position: new THREE.Vector3(0, 0.05, 0.18) }))
+      fpWeapon.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.07, 0.2), new THREE.MeshLambertMaterial({ color: 0x654321 })), { position: new THREE.Vector3(0, 0, -0.4) }))
     }
-
     fpWeapon.position.set(0.25, -0.2, -0.4)
     camera.add(fpWeapon)
     scene.add(camera)
@@ -373,29 +428,33 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
     camera.add(muzzleFlash)
 
     // ===== GAME STATE =====
-    const maxAmmo = playerWeapon === 'shotgun' ? 8 : playerWeapon === 'sniper' ? 5 : playerWeapon === 'pistol' ? 12 : 30
     const state = {
       bullets: [] as Bullet[],
       keys: {} as Record<string, boolean>,
-      yaw: Math.PI * 0.75, // Start looking toward bot
+      yaw: Math.PI * 0.75,
       pitch: 0,
       lastShot: 0,
-      botLastShot: 0,
       playerHP: playerMaxHP,
-      botHP: botMaxHP,
-      ammo: maxAmmo,
-      maxAmmo,
       isReloading: false,
       reloadStart: 0,
       playerPos: new THREE.Vector3(-40, 0, -40),
-      botPos: new THREE.Vector3(40, 0, 40),
-      botStrafeDir: 1,
-      botStrafeTimer: 0,
+      bot1Pos: new THREE.Vector3(40, 0, 40),
+      bot2Pos: new THREE.Vector3(40, 0, -40),
+      bot1HP: bot1MaxHP,
+      bot2HP: 100,
+      bot1LastShot: 0,
+      bot2LastShot: 0,
+      bot1StrafeDir: 1,
+      bot1StrafeTimer: 0,
+      bot2StrafeDir: 1,
+      bot2StrafeTimer: 0,
       gameOver: false,
       weaponBob: 0,
       recoilOffset: 0,
       isMouseDown: false,
-      mouseInCanvas: false,
+      isLocked: false,
+      ammo: maxAmmo,
+      maxAmmo: maxAmmo,
     }
 
     // ===== COLLISION =====
@@ -409,7 +468,7 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
       return false
     }
 
-    // ===== INPUT (works WITHOUT pointer lock) =====
+    // ===== INPUT =====
     const onKeyDown = (e: KeyboardEvent) => {
       state.keys[e.key.toLowerCase()] = true
       if (e.key.toLowerCase() === 'r' && !state.isReloading && state.ammo < state.maxAmmo) {
@@ -420,56 +479,35 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
     }
     const onKeyUp = (e: KeyboardEvent) => { state.keys[e.key.toLowerCase()] = false }
 
-    // Mouse look - works by tracking mouse position relative to center
-    let lastMouseX = window.innerWidth / 2
-    let lastMouseY = window.innerHeight / 2
-    let mouseLookActive = false
-
+    // Mouse look - uses Pointer Lock API correctly
     const onMouseMove = (e: MouseEvent) => {
-      if (!mouseLookActive || state.gameOver) return
-      const dx = e.clientX - lastMouseX
-      const dy = e.clientY - lastMouseY
-      lastMouseX = e.clientX
-      lastMouseY = e.clientY
-      state.yaw -= dx * 0.003
-      state.pitch -= dy * 0.003
+      if (!state.isLocked || state.gameOver) return
+      state.yaw -= e.movementX * 0.002
+      state.pitch -= e.movementY * 0.002
       state.pitch = Math.max(-1.2, Math.min(1.2, state.pitch))
     }
 
+    // Shooting - SEPARATE from pointer lock request
     const onMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) {
+      if (e.button === 0 && !state.gameOver) {
         state.isMouseDown = true
-        if (!state.gameOver) {
-          if (!mouseLookActive) {
-            mouseLookActive = true
-            lastMouseX = e.clientX
-            lastMouseY = e.clientY
-            setStarted(true)
-          }
-          playerShoot()
-        }
+        playerShoot()
       }
     }
     const onMouseUp = (e: MouseEvent) => {
       if (e.button === 0) state.isMouseDown = false
     }
 
-    // Also try pointer lock if available
+    // Pointer lock - only requested on explicit canvas click
     const onPointerLockChange = () => {
-      if (document.pointerLockElement === renderer.domElement) {
-        mouseLookActive = true
-        setStarted(true)
-      }
+      state.isLocked = document.pointerLockElement === renderer.domElement
+      setNeedsLock(!state.isLocked)
     }
 
-    const onCanvasClick = () => {
-      // Try pointer lock, but game works without it too
-      try { renderer.domElement.requestPointerLock() } catch(e) { /* ignore */ }
-      mouseLookActive = true
-      setStarted(true)
+    const requestLock = () => {
+      renderer.domElement.requestPointerLock()
     }
 
-    // Context menu prevention
     const onContextMenu = (e: Event) => e.preventDefault()
 
     document.addEventListener('keydown', onKeyDown)
@@ -478,77 +516,145 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
     document.addEventListener('mousedown', onMouseDown)
     document.addEventListener('mouseup', onMouseUp)
     document.addEventListener('pointerlockchange', onPointerLockChange)
-    renderer.domElement.addEventListener('click', onCanvasClick)
     renderer.domElement.addEventListener('contextmenu', onContextMenu)
 
     // ===== SHOOTING =====
     function playerShoot() {
-      if (state.gameOver) return
+      if (state.gameOver || !state.isLocked) return
       const now = Date.now()
       if (state.isReloading) return
       if (state.ammo <= 0) {
-        state.isReloading = true
-        state.reloadStart = now
-        setIsReloading(true)
-        return
+        state.isReloading = true; state.reloadStart = now; setIsReloading(true); return
       }
       if (now - state.lastShot < weaponStats.fireRate) return
       state.lastShot = now
-      state.ammo--
-      setAmmo(state.ammo)
-
+      state.ammo--; setAmmo(state.ammo)
       state.recoilOffset = playerWeapon === 'sniper' ? 0.12 : playerWeapon === 'shotgun' ? 0.08 : 0.04
       state.pitch += playerWeapon === 'sniper' ? 0.025 : playerWeapon === 'shotgun' ? 0.015 : 0.005
       flashMat.opacity = 1
 
-      // Get camera forward direction
-      const dir = new THREE.Vector3(0, 0, -1)
-      dir.applyQuaternion(camera.quaternion)
-
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
       for (let i = 0; i < weaponStats.bulletsPerShot; i++) {
         const bullet = new THREE.Mesh(
           new THREE.SphereGeometry(playerWeapon === 'sniper' ? 0.03 : 0.04, 4, 4),
           new THREE.MeshBasicMaterial({ color: playerWeapon === 'sniper' ? 0x44ffff : 0xffff44 })
         )
-        bullet.position.copy(state.playerPos)
-        bullet.position.y += 1.6
-
+        bullet.position.copy(state.playerPos); bullet.position.y += 1.6
         const vel = dir.clone()
         vel.x += (Math.random() - 0.5) * weaponStats.spread
         vel.y += (Math.random() - 0.5) * weaponStats.spread
         vel.z += (Math.random() - 0.5) * weaponStats.spread
         vel.normalize().multiplyScalar(playerWeapon === 'sniper' ? 4 : 2.5)
-
         scene.add(bullet)
-        state.bullets.push({ mesh: bullet, velocity: vel, life: 80, isPlayer: true, damage: weaponStats.damage })
+        state.bullets.push({ mesh: bullet, velocity: vel, life: 80, ownerId: 'player', damage: weaponStats.damage })
       }
     }
 
-    function botShoot() {
+    function botShoot(botId: string, botPos: THREE.Vector3, targetPos: THREE.Vector3) {
       if (state.gameOver) return
       const now = Date.now()
-      if (now - state.botLastShot < weaponStats.fireRate * 2) return
-      state.botLastShot = now
+      const lastShotKey = botId === 'bot1' ? 'bot1LastShot' : 'bot2LastShot'
+      if (now - state[lastShotKey] < weaponStats.fireRate * 2.2) return
+      state[lastShotKey] = now
 
-      const toPlayer = new THREE.Vector3().subVectors(
-        new THREE.Vector3(state.playerPos.x, state.playerPos.y + 1.2, state.playerPos.z),
-        new THREE.Vector3(state.botPos.x, state.botPos.y + 1.2, state.botPos.z)
+      const toTarget = new THREE.Vector3().subVectors(
+        new THREE.Vector3(targetPos.x, targetPos.y + 1.2, targetPos.z),
+        new THREE.Vector3(botPos.x, botPos.y + 1.2, botPos.z)
       ).normalize()
 
       for (let i = 0; i < weaponStats.bulletsPerShot; i++) {
-        const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.04, 4, 4), new THREE.MeshBasicMaterial({ color: 0xff4444 }))
-        bullet.position.copy(state.botPos)
-        bullet.position.y += 1.2
-
-        const vel = toPlayer.clone()
+        const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.04, 4, 4),
+          new THREE.MeshBasicMaterial({ color: botId === 'bot1' ? 0xff6644 : 0xff44ff }))
+        bullet.position.copy(botPos); bullet.position.y += 1.2
+        const vel = toTarget.clone()
         vel.x += (Math.random() - 0.5) * weaponStats.spread * 2.5
         vel.y += (Math.random() - 0.5) * weaponStats.spread * 2.5
         vel.z += (Math.random() - 0.5) * weaponStats.spread * 2.5
         vel.normalize().multiplyScalar(2)
-
         scene.add(bullet)
-        state.bullets.push({ mesh: bullet, velocity: vel, life: 80, isPlayer: false, damage: weaponStats.damage })
+        state.bullets.push({ mesh: bullet, velocity: vel, life: 80, ownerId: botId, damage: weaponStats.damage })
       }
+    }
+
+    // ===== BOT AI =====
+    function updateBot1(botPos: THREE.Vector3, botSpeed: number) {
+      const targets: { pos: THREE.Vector3; id: string }[] = [
+        { pos: state.playerPos, id: 'player' },
+      ]
+      if (state.bot2HP > 0) targets.push({ pos: state.bot2Pos, id: 'bot2' })
+
+      let closestTarget = targets[0]
+      let closestDist = Infinity
+      for (const t of targets) {
+        const d = botPos.distanceTo(t.pos)
+        if (d < closestDist) { closestDist = d; closestTarget = t }
+      }
+      if (closestDist > 80) return
+
+      const toTarget = new THREE.Vector3().subVectors(closestTarget.pos, botPos)
+      const dist = toTarget.length()
+      const idealDist = 18
+
+      state.bot1StrafeTimer += 0.016
+      if (state.bot1StrafeTimer > 2 + Math.random() * 2) {
+        state.bot1StrafeDir *= -1
+        state.bot1StrafeTimer = 0
+      }
+
+      const botMove = new THREE.Vector3()
+      if (dist > idealDist + 8) botMove.add(toTarget.clone().normalize().multiplyScalar(0.7))
+      else if (dist < idealDist - 8) botMove.add(toTarget.clone().normalize().multiplyScalar(-0.5))
+      const strafe = new THREE.Vector3(-toTarget.z, 0, toTarget.x).normalize()
+      botMove.add(strafe.multiplyScalar(state.bot1StrafeDir * 0.4))
+
+      if (botMove.length() > 0) {
+        botMove.normalize()
+        const newPos = botPos.clone().add(botMove.multiplyScalar(botSpeed * 0.016))
+        newPos.x = Math.max(-85, Math.min(85, newPos.x))
+        newPos.z = Math.max(-85, Math.min(85, newPos.z))
+        if (!checkCollision(newPos, 0.6)) botPos.copy(newPos)
+      }
+      if (dist < 55 && dist > 3) botShoot('bot1', botPos, closestTarget.pos)
+    }
+
+    function updateBot2(botPos: THREE.Vector3, botSpeed: number) {
+      const targets: { pos: THREE.Vector3; id: string }[] = [
+        { pos: state.playerPos, id: 'player' },
+      ]
+      if (state.bot1HP > 0) targets.push({ pos: state.bot1Pos, id: 'bot1' })
+
+      let closestTarget = targets[0]
+      let closestDist = Infinity
+      for (const t of targets) {
+        const d = botPos.distanceTo(t.pos)
+        if (d < closestDist) { closestDist = d; closestTarget = t }
+      }
+      if (closestDist > 80) return
+
+      const toTarget = new THREE.Vector3().subVectors(closestTarget.pos, botPos)
+      const dist = toTarget.length()
+      const idealDist = 18
+
+      state.bot2StrafeTimer += 0.016
+      if (state.bot2StrafeTimer > 2 + Math.random() * 2) {
+        state.bot2StrafeDir *= -1
+        state.bot2StrafeTimer = 0
+      }
+
+      const botMove = new THREE.Vector3()
+      if (dist > idealDist + 8) botMove.add(toTarget.clone().normalize().multiplyScalar(0.7))
+      else if (dist < idealDist - 8) botMove.add(toTarget.clone().normalize().multiplyScalar(-0.5))
+      const strafe = new THREE.Vector3(-toTarget.z, 0, toTarget.x).normalize()
+      botMove.add(strafe.multiplyScalar(state.bot2StrafeDir * 0.4))
+
+      if (botMove.length() > 0) {
+        botMove.normalize()
+        const newPos = botPos.clone().add(botMove.multiplyScalar(botSpeed * 0.016))
+        newPos.x = Math.max(-85, Math.min(85, newPos.x))
+        newPos.z = Math.max(-85, Math.min(85, newPos.z))
+        if (!checkCollision(newPos, 0.6)) botPos.copy(newPos)
+      }
+      if (dist < 55 && dist > 3) botShoot('bot2', botPos, closestTarget.pos)
     }
 
     // ===== GAME LOOP =====
@@ -563,33 +669,21 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
       if (state.gameOver) { renderer.render(scene, camera); return }
 
       // Auto-fire for automatic weapons
-      if (state.isMouseDown && mouseLookActive && playerWeapon === 'ak') {
-        playerShoot()
-      }
+      if (state.isMouseDown && state.isLocked && playerWeapon === 'ak') playerShoot()
 
       // Reload
       if (state.isReloading && Date.now() - state.reloadStart > 2000) {
-        state.isReloading = false
-        state.ammo = state.maxAmmo
-        setIsReloading(false)
-        setAmmo(state.maxAmmo)
+        state.isReloading = false; state.ammo = state.maxAmmo; setIsReloading(false); setAmmo(state.maxAmmo)
       }
 
-      // ===== PLAYER MOVEMENT - FIXED =====
-      // Get camera forward and right vectors (projected on XZ plane)
-      const forward = new THREE.Vector3(0, 0, -1)
-      forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), state.yaw)
-      forward.y = 0
-      forward.normalize()
-
-      const right = new THREE.Vector3(1, 0, 0)
-      right.applyAxisAngle(new THREE.Vector3(0, 1, 0), state.yaw)
-      right.y = 0
-      right.normalize()
+      // ===== PLAYER MOVEMENT =====
+      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), state.yaw)
+      forward.y = 0; forward.normalize()
+      const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), state.yaw)
+      right.y = 0; right.normalize()
 
       const moveDir = new THREE.Vector3()
       let isMoving = false
-
       if (state.keys['w'] || state.keys['ц']) { moveDir.add(forward); isMoving = true }
       if (state.keys['s'] || state.keys['ы']) { moveDir.sub(forward); isMoving = true }
       if (state.keys['d'] || state.keys['в']) { moveDir.add(right); isMoving = true }
@@ -600,9 +694,8 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
         const newPos = state.playerPos.clone().add(moveDir.multiplyScalar(playerSpeed * dt))
         newPos.x = Math.max(-85, Math.min(85, newPos.x))
         newPos.z = Math.max(-85, Math.min(85, newPos.z))
-        if (!checkCollision(newPos, 0.6)) {
-          state.playerPos.copy(newPos)
-        } else {
+        if (!checkCollision(newPos, 0.6)) state.playerPos.copy(newPos)
+        else {
           const sX = state.playerPos.clone(); sX.x = newPos.x
           if (!checkCollision(sX, 0.6)) state.playerPos.x = newPos.x
           const sZ = state.playerPos.clone(); sZ.z = newPos.z
@@ -614,7 +707,7 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
       playerModel.position.copy(state.playerPos)
       playerModel.rotation.y = state.yaw
 
-      // ===== CAMERA =====
+      // Camera
       camera.position.set(state.playerPos.x, state.playerPos.y + 1.7, state.playerPos.z)
       camera.rotation.order = 'YXZ'
       camera.rotation.y = state.yaw
@@ -625,79 +718,75 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
       const bobY = isMoving ? Math.abs(Math.cos(state.weaponBob)) * 0.008 : 0
       fpWeapon.position.set(0.25 + bobX, -0.2 + bobY, -0.4 + state.recoilOffset)
       state.recoilOffset *= 0.88
+      if (flashMat.opacity > 0) { flashMat.opacity -= dt * 15; if (flashMat.opacity < 0) flashMat.opacity = 0 }
 
-      if (flashMat.opacity > 0) {
-        flashMat.opacity -= dt * 15
-        if (flashMat.opacity < 0) flashMat.opacity = 0
+      // ===== BOT 1 AI =====
+      if (state.bot1HP > 0) {
+        const bot1Speed = bot1Character === 'lisa' ? 7 : 11
+        updateBot1(state.bot1Pos, bot1Speed)
+        bot1Model.position.copy(state.bot1Pos)
+        const t1 = state.playerPos.distanceTo(state.bot1Pos) < (state.bot2HP > 0 ? state.bot2Pos.distanceTo(state.bot1Pos) : Infinity)
+          ? state.playerPos : state.bot2Pos
+        bot1Model.rotation.y = Math.atan2(t1.x - state.bot1Pos.x, t1.z - state.bot1Pos.z)
       }
 
-      // ===== BOT AI =====
-      const toPlayer = new THREE.Vector3().subVectors(state.playerPos, state.botPos)
-      const distToPlayer = toPlayer.length()
-      const botSpeed = botCharacter === 'lisa' ? 7 : 11
-
-      state.botStrafeTimer += dt
-      if (state.botStrafeTimer > 2 + Math.random() * 2) {
-        state.botStrafeDir *= -1
-        state.botStrafeTimer = 0
+      // ===== BOT 2 (AIDAR) AI =====
+      if (state.bot2HP > 0) {
+        updateBot2(state.bot2Pos, 9)
+        bot2Model.position.copy(state.bot2Pos)
+        const t2 = state.playerPos.distanceTo(state.bot2Pos) < (state.bot1HP > 0 ? state.bot1Pos.distanceTo(state.bot2Pos) : Infinity)
+          ? state.playerPos : state.bot1Pos
+        bot2Model.rotation.y = Math.atan2(t2.x - state.bot2Pos.x, t2.z - state.bot2Pos.z)
       }
-
-      const idealDist = playerWeapon === 'sniper' ? 35 : playerWeapon === 'shotgun' ? 8 : 18
-      const botMove = new THREE.Vector3()
-
-      if (distToPlayer > idealDist + 8) {
-        botMove.add(toPlayer.clone().normalize().multiplyScalar(0.7))
-      } else if (distToPlayer < idealDist - 8) {
-        botMove.add(toPlayer.clone().normalize().multiplyScalar(-0.5))
-      }
-
-      const strafe = new THREE.Vector3(-toPlayer.z, 0, toPlayer.x).normalize()
-      botMove.add(strafe.multiplyScalar(state.botStrafeDir * 0.4))
-
-      if (botMove.length() > 0) {
-        botMove.normalize()
-        const newBotPos = state.botPos.clone().add(botMove.multiplyScalar(botSpeed * dt))
-        newBotPos.x = Math.max(-85, Math.min(85, newBotPos.x))
-        newBotPos.z = Math.max(-85, Math.min(85, newBotPos.z))
-        if (!checkCollision(newBotPos, 0.6)) state.botPos.copy(newBotPos)
-      }
-
-      botModel.position.copy(state.botPos)
-      botModel.rotation.y = Math.atan2(state.playerPos.x - state.botPos.x, state.playerPos.z - state.botPos.z)
-
-      if (distToPlayer < 55 && distToPlayer > 3) botShoot()
 
       // ===== BULLETS =====
       for (let i = state.bullets.length - 1; i >= 0; i--) {
         const b = state.bullets[i]
         b.mesh.position.add(b.velocity)
         b.life--
-
         if (b.life <= 0) { scene.remove(b.mesh); state.bullets.splice(i, 1); continue }
 
-        if (!b.isPlayer) {
-          const hp = new THREE.Vector3(state.playerPos.x, state.playerPos.y + 1.2, state.playerPos.z)
-          if (b.mesh.position.distanceTo(hp) < 1.0) {
-            state.playerHP -= b.damage
-            setPlayerHP(Math.max(0, state.playerHP))
-            showDamageFlash()
-            scene.remove(b.mesh); state.bullets.splice(i, 1)
-            if (state.playerHP <= 0) { state.gameOver = true; setGameOver('lose'); document.exitPointerLock() }
-            continue
-          }
-        }
+        // Check hits on all entities
+        const hitTargets: { pos: THREE.Vector3; id: string }[] = [
+          { pos: new THREE.Vector3(state.playerPos.x, state.playerPos.y + 1.2, state.playerPos.z), id: 'player' },
+          { pos: new THREE.Vector3(state.bot1Pos.x, state.bot1Pos.y + 1.2, state.bot1Pos.z), id: 'bot1' },
+          { pos: new THREE.Vector3(state.bot2Pos.x, state.bot2Pos.y + 1.2, state.bot2Pos.z), id: 'bot2' },
+        ]
 
-        if (b.isPlayer) {
-          const hb = new THREE.Vector3(state.botPos.x, state.botPos.y + 1.2, state.botPos.z)
-          if (b.mesh.position.distanceTo(hb) < 1.0) {
-            state.botHP -= b.damage
-            setBotHP(Math.max(0, state.botHP))
-            showHitMarker()
+        let hit = false
+        for (const target of hitTargets) {
+          if (b.ownerId === target.id) continue // can't hit self
+          if (target.id === 'bot1' && state.bot1HP <= 0) continue
+          if (target.id === 'bot2' && state.bot2HP <= 0) continue
+
+          if (b.mesh.position.distanceTo(target.pos) < 1.0) {
+            if (target.id === 'player') {
+              state.playerHP -= b.damage
+              setPlayerHP(Math.max(0, state.playerHP))
+              showDamageFlash()
+              if (state.playerHP <= 0) { state.gameOver = true; setGameOver('lose'); document.exitPointerLock() }
+            } else if (target.id === 'bot1') {
+              state.bot1HP -= b.damage
+              setBot1HP(Math.max(0, state.bot1HP))
+              if (b.ownerId === 'player') showHitMarker()
+              if (state.bot1HP <= 0 && b.ownerId === 'player') setKillCount(c => c + 1)
+            } else if (target.id === 'bot2') {
+              state.bot2HP -= b.damage
+              setBot2HP(Math.max(0, state.bot2HP))
+              if (b.ownerId === 'player') showHitMarker()
+              if (state.bot2HP <= 0 && b.ownerId === 'player') setKillCount(c => c + 1)
+            }
             scene.remove(b.mesh); state.bullets.splice(i, 1)
-            if (state.botHP <= 0) { state.gameOver = true; setKillCount(c => c + 1); setGameOver('win'); document.exitPointerLock() }
-            continue
+            hit = true
+            break
           }
         }
+        if (hit) continue
+      }
+
+      // Win condition: both bots dead
+      if (state.bot1HP <= 0 && state.bot2HP <= 0 && !state.gameOver) {
+        state.gameOver = true; setGameOver('win'); document.exitPointerLock()
       }
 
       renderer.render(scene, camera)
@@ -721,19 +810,21 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
       document.removeEventListener('mouseup', onMouseUp)
       document.removeEventListener('pointerlockchange', onPointerLockChange)
       window.removeEventListener('resize', onResize)
-      renderer.domElement.removeEventListener('click', onCanvasClick)
       renderer.domElement.removeEventListener('contextmenu', onContextMenu)
       if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement)
       renderer.dispose()
     }
   }, [])
 
+  const bot1Name = bot1Character === 'lisa' ? 'Лиза' : 'Даша'
+  const bot1Emoji = bot1Character === 'lisa' ? '👧' : '🐱'
+
   return (
     <div className="relative w-full h-full select-none overflow-hidden">
-      <div ref={containerRef} className="w-full h-full" style={{ cursor: started ? 'none' : 'pointer' }} />
+      <div ref={containerRef} className="w-full h-full" style={{ cursor: needsLock ? 'pointer' : 'none' }} />
 
       {/* Crosshair */}
-      {started && !gameOver && (
+      {!needsLock && !gameOver && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div className="relative w-8 h-8">
             <div className="absolute top-1/2 left-0 w-full h-[2px] -translate-y-1/2">
@@ -788,20 +879,34 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
         </div>
       </div>
 
-      {/* Bot HUD */}
+      {/* Bot 1 HUD */}
       <div className="absolute top-6 right-6 pointer-events-none z-10">
-        <div className="bg-black/70 backdrop-blur-sm rounded-xl p-4 border border-white/10">
-          <div className="flex items-center gap-3 mb-2">
-            <span className="text-2xl">{botCharacter === 'lisa' ? '👧' : '🐱'}</span>
+        <div className="bg-black/70 backdrop-blur-sm rounded-xl p-3 border border-white/10 mb-2">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl">{bot1Emoji}</span>
             <div>
-              <div className="text-white font-bold text-sm">{botCharacter === 'lisa' ? 'Лиза' : 'Даша'}</div>
-              <div className="text-xs text-red-400">БОТ</div>
+              <div className="text-white font-bold text-sm">{bot1Name}</div>
+              <div className="text-xs text-red-400">БОТ 1</div>
             </div>
           </div>
-          <div className="w-44 h-3 bg-gray-800 rounded-full overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full transition-all duration-300" style={{ width: `${(botHP / botMaxHP) * 100}%` }} />
+          <div className="w-36 h-2.5 bg-gray-800 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full transition-all duration-300" style={{ width: `${(bot1HP / bot1MaxHP) * 100}%` }} />
           </div>
-          <div className="text-white text-xs mt-1 font-mono">❤️ {Math.max(0, botHP)} / {botMaxHP}</div>
+          <div className="text-white text-xs mt-1 font-mono">❤️ {Math.max(0, bot1HP)} / {bot1MaxHP}</div>
+        </div>
+        {/* Bot 2 - Aidar */}
+        <div className="bg-black/70 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl">🧑</span>
+            <div>
+              <div className="text-white font-bold text-sm">Айдар</div>
+              <div className="text-xs text-purple-400">БОТ 2</div>
+            </div>
+          </div>
+          <div className="w-36 h-2.5 bg-gray-800 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-purple-600 to-purple-400 rounded-full transition-all duration-300" style={{ width: `${bot2HP}%` }} />
+          </div>
+          <div className="text-white text-xs mt-1 font-mono">❤️ {Math.max(0, bot2HP)} / 100</div>
         </div>
       </div>
 
@@ -816,7 +921,7 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
             {isReloading ? (
               <span className="text-yellow-400 animate-pulse text-lg">⟳ Перезарядка...</span>
             ) : (
-              <>{ammo} <span className="text-gray-500 text-base">/ {playerWeapon === 'shotgun' ? 8 : playerWeapon === 'sniper' ? 5 : playerWeapon === 'pistol' ? 12 : 30}</span></>
+              <>{ammo} <span className="text-gray-500 text-base">/ {maxAmmo}</span></>
             )}
           </div>
           <div className="text-xs text-gray-400 mt-1">R — перезарядка</div>
@@ -841,16 +946,18 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
         ← Меню
       </button>
 
-      {/* Start instruction - disappears on first click */}
-      {!started && !gameOver && (
-        <div className="absolute inset-0 flex items-center justify-center z-40">
+      {/* Pointer Lock overlay */}
+      {needsLock && !gameOver && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-40 cursor-pointer"
+          onClick={() => containerRef.current?.querySelector('canvas')?.requestPointerLock()}>
           <div className="bg-black/80 backdrop-blur-md rounded-2xl p-8 text-center border border-white/20 max-w-md">
             <h3 className="text-2xl font-bold text-white mb-4">🎮 Готов к бою!</h3>
-            <p className="text-gray-300 mb-2">Вы: {playerCharacter === 'lisa' ? '👧 Лиза' : '🐱 Даша'}</p>
-            <p className="text-gray-300 mb-2">Противник: {botCharacter === 'lisa' ? '👧 Лиза' : '🐱 Даша'}</p>
+            <p className="text-gray-300 mb-1">Вы: {playerCharacter === 'lisa' ? '👧 Лиза' : '🐱 Даша'}</p>
+            <p className="text-gray-300 mb-1">Противники: {bot1Emoji} {bot1Name} + 🧑 Айдар</p>
             <p className="text-gray-300 mb-4">Оружие: {weaponStats.emoji} {weaponStats.name}</p>
-            <p className="text-yellow-400 text-lg animate-pulse">👆 Кликните в любом месте чтобы начать</p>
-            <p className="text-gray-500 text-xs mt-3">Двигайте мышь для поворота камеры</p>
+            <p className="text-yellow-400 text-lg animate-pulse">👆 Кликните чтобы начать</p>
+            <p className="text-gray-500 text-xs mt-3">Мышь будет захвачена для управления камерой</p>
+            <p className="text-gray-500 text-xs">Нажмите ESC чтобы освободить мышь</p>
           </div>
         </div>
       )}
@@ -863,13 +970,13 @@ export default function Game({ playerCharacter, playerWeapon, onBackToMenu }: Pr
               <>
                 <div className="text-8xl mb-4">🏆</div>
                 <h2 className="text-5xl font-bold text-green-400 mb-2">ПОБЕДА!</h2>
-                <p className="text-xl text-gray-300 mb-2">Вы победили {botCharacter === 'lisa' ? 'Лизу' : 'Дашу'}!</p>
+                <p className="text-xl text-gray-300 mb-2">Вы победили всех противников!</p>
               </>
             ) : (
               <>
                 <div className="text-8xl mb-4">💀</div>
                 <h2 className="text-5xl font-bold text-red-400 mb-2">ПОРАЖЕНИЕ</h2>
-                <p className="text-xl text-gray-300 mb-2">{botCharacter === 'lisa' ? 'Лиза' : 'Даша'} победила вас!</p>
+                <p className="text-xl text-gray-300 mb-2">Вас уничтожили!</p>
               </>
             )}
             <p className="text-gray-400 mb-8">Убийств: {killCount}</p>
